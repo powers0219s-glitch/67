@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>智慧摩托車數位儀表板 & TPMS 監控系統</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <!-- QRCode.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <!-- Google Fonts: Chakra Petch (賽車數位字體) & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            tech: ['"Chakra Petch"', 'sans-serif'],
+            mono: ['"Share Tech Mono"', 'monospace'],
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            dash: {
+              bg: '#07090e',
+              card: '#0f141f',
+              border: '#1b2434',
+              accent: '#38bdf8',
+              brake: '#f43f5e',
+              fuel: '#3b82f6',
+              green: '#10b981',
+              amber: '#f59e0b',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #07090e;
+      color: #e2e8f0;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 漸變與平滑過渡 */
+    .smooth-transition {
+      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* 散熱風扇轉動動畫 */
+    @keyframes fan-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .fan-spinning {
+      animation: fan-spin 0.9s linear infinite;
+    }
+
+    /* 線性滑動條客製化樣式 */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: transparent;
+    }
+    input[type=range]:focus {
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 22px;
+      width: 22px;
+      border-radius: 50%;
+      background: #ffffff;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.8), 0 0 4px rgba(56, 189, 248, 0.8);
+      margin-top: -8px;
+    }
+    input[type=range]::-moz-range-thumb {
+      height: 22px;
+      width: 22px;
+      border-radius: 50%;
+      background: #ffffff;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+      border: none;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      width: 100%;
+      height: 6px;
+      cursor: pointer;
+      background: #1e293b;
+      border-radius: 3px;
+    }
+    input[type=range]::-moz-range-track {
+      width: 100%;
+      height: 6px;
+      cursor: pointer;
+      background: #1e293b;
+      border-radius: 3px;
+    }
+
+    /* 煞車滑桿專用 Thumb */
+    #slider-brake::-webkit-slider-thumb {
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.8), 0 0 6px rgba(244, 63, 94, 0.9);
+      background: #fda4af;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-2 sm:p-4 selection:bg-sky-500 selection:text-white">
+
+  <!-- ==================== 頂部狀態列 (Status Bar) ==================== -->
+  <header class="w-full max-w-5xl mx-auto px-2 sm:px-4 py-2 flex items-center justify-between border-b border-white/10 text-xs text-slate-400 font-tech">
+    <!-- 左側系統安全與燈號 -->
+    <div class="flex items-center space-x-2 sm:space-x-3">
+      <div class="flex items-center space-x-1">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="font-bold text-slate-200 tracking-wider hidden sm:inline">BMW MOTORRAD TFT</span>
+      </div>
+      <div class="flex items-center space-x-1 pl-2 border-l border-white/10 text-[10px]">
+        <span class="px-1.5 py-0.5 rounded font-bold bg-emerald-950 text-emerald-400 border border-emerald-800/40">ABS PRO</span>
+        <span class="px-1.5 py-0.5 rounded font-bold bg-emerald-950 text-emerald-400 border border-emerald-800/40">DTC ON</span>
+      </div>
+    </div>
+
+    <!-- 中央：氣溫與時鐘 -->
+    <div class="flex items-center space-x-3 sm:space-x-4">
+      <span class="flex items-center gap-1 text-slate-300">
+        <i class="ph ph-thermometer-simple text-amber-400"></i>
+        <span id="ambient-temp" class="font-mono">27°C</span>
+      </span>
+      <span id="clock-display" class="font-mono text-sm font-bold text-white tracking-widest">14:28</span>
+    </div>
+
+    <!-- 右側：QR Code 分享與單位切換 -->
+    <div class="flex items-center space-x-2">
+      <button onclick="setPressureUnit(state.unit === 'psi' ? 'bar' : 'psi')" id="btn-unit" class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/15 text-slate-300 text-[11px] font-mono transition-all">
+        單位: PSI
+      </button>
+      <button onclick="openQrModal()" class="flex items-center space-x-1 px-2 py-1 rounded bg-sky-500/10 hover:bg-sky-500/20 border border-sky-400/40 text-sky-300 text-[11px] transition-all" title="產生手機 QR Code">
+        <i class="ph-bold ph-qr-code text-sm"></i>
+        <span class="hidden sm:inline">手機掃描</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== 數位儀表板本體 ==================== -->
+  <main class="w-full max-w-5xl mx-auto flex-1 flex flex-col justify-center py-2 sm:py-3 space-y-3 sm:space-y-4">
+
+    <!-- 1. 賽道級線性轉速條 (0 ~ 13,000 RPM) -->
+    <div class="bg-[#0f141f] border border-white/10 rounded-xl p-2.5 sm:p-3">
+      <div class="flex justify-between items-center mb-1 text-[11px] font-tech text-slate-400">
+        <div class="flex items-center space-x-2">
+          <span class="tracking-widest font-bold text-slate-300">ENGINE SPEED</span>
+          <span class="text-slate-500 font-mono text-[10px]">x1000 RPM</span>
+        </div>
+        <div class="flex items-center space-x-1.5 font-mono">
+          <span id="rpm-text" class="text-sm font-bold text-white tabular-nums">1,250</span>
+          <span class="text-slate-500 text-[10px]">RPM</span>
+        </div>
+      </div>
+
+      <!-- 刻度槽 -->
+      <div class="relative w-full h-3 bg-black/70 rounded-md overflow-hidden border border-white/5 flex items-center px-1">
+        <div class="absolute inset-0 flex justify-between px-2 text-[9px] font-mono text-slate-500 items-center pointer-events-none select-none z-10">
+          <span>0</span>
+          <span>2</span>
+          <span>4</span>
+          <span>6</span>
+          <span>8</span>
+          <span class="text-amber-500/80">10</span>
+          <span class="text-rose-500 font-bold">12</span>
+        </div>
+        <!-- 轉速動態條 -->
+        <div id="rpm-bar" class="h-1.5 rounded bg-gradient-to-r from-sky-400 via-emerald-400 to-rose-500 smooth-transition" style="width: 9%;"></div>
+      </div>
+    </div>
+
+    <!-- 2. 主資訊區：左側動力時速 + 右側 TPMS 胎壓監控 -->
+    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-4">
+      
+      <!-- ===== 左側：時速、檔位、水溫、散熱 (7 欄) ===== -->
+      <div class="md:col-span-7 bg-[#0f141f] border border-white/10 rounded-2xl p-4 sm:p-6 flex flex-col justify-between space-y-4">
+        
+        <!-- 頂部工況模式 -->
+        <div class="flex items-center justify-between text-xs font-tech text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span id="drive-state-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span id="drive-state-text" class="tracking-wider text-slate-300 font-semibold">怠速運轉 (IDLE)</span>
+          </div>
+          <span class="text-sky-400 font-bold tracking-wider text-[11px] bg-sky-950/60 px-2 py-0.5 rounded border border-sky-800/40">DYNAMIC MODE</span>
+        </div>
+
+        <!-- 檔位與時速大字並排 -->
+        <div class="flex items-center justify-between my-2 px-2">
+          <!-- 檔位方塊 -->
+          <div class="flex flex-col items-center">
+            <span class="text-[10px] text-slate-400 font-tech uppercase tracking-widest mb-1 font-bold">GEAR</span>
+            <div id="gear-box" class="w-16 h-18 sm:w-20 sm:h-24 rounded-2xl bg-black/60 border-2 border-emerald-400/80 flex items-center justify-center shadow-inner">
+              <span id="gear-val" class="font-tech text-4xl sm:text-6xl font-black text-emerald-400">N</span>
+            </div>
+          </div>
+
+          <!-- 時速數字 -->
+          <div class="text-right">
+            <div class="flex items-baseline justify-end">
+              <span id="speed-val" class="font-tech text-6xl sm:text-8xl md:text-9xl font-black tracking-tight text-white tabular-nums">0</span>
+            </div>
+            <div class="text-slate-400 font-tech text-xs sm:text-sm font-semibold tracking-widest -mt-1 sm:-mt-2">
+              KM / H
+            </div>
+          </div>
+        </div>
+
+        <!-- 引擎熱管理與即時油耗 -->
+        <div class="grid grid-cols-2 gap-2 sm:gap-3 pt-3 border-t border-white/10 text-xs font-tech">
+          <!-- 水溫與散熱風扇 -->
+          <div class="bg-black/40 p-2.5 rounded-xl border border-white/5">
+            <div class="flex justify-between items-center text-slate-400 mb-1">
+              <span class="flex items-center gap-1 text-[11px]">
+                <i class="ph ph-drop text-sky-400"></i> 水溫 (Coolant)
+              </span>
+              <div id="fan-badge" class="flex items-center space-x-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 font-mono">
+                <i id="fan-icon" class="ph-bold ph-fan"></i>
+                <span id="fan-status">FAN OFF</span>
+              </div>
+            </div>
+            <div class="flex justify-between items-center mb-1">
+              <span id="coolant-val" class="text-sm font-bold font-mono text-slate-200">89°C</span>
+              <span id="coolant-state" class="text-[10px] text-slate-500 font-mono">怠速無撞風</span>
+            </div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+              <div id="coolant-bar" class="bg-sky-400 h-full rounded-full smooth-transition" style="width: 58%;"></div>
+            </div>
+          </div>
+
+          <!-- 即時油耗 -->
+          <div class="bg-black/40 p-2.5 rounded-xl border border-white/5">
+            <div class="flex justify-between items-center text-slate-400 mb-1">
+              <span class="flex items-center gap-1 text-[11px]">
+                <i class="ph ph-gauge text-emerald-400"></i> 即時耗能
+              </span>
+              <span class="text-[10px] text-slate-500 font-mono">km/L</span>
+            </div>
+            <div class="flex justify-between items-center mb-1">
+              <span id="eco-val" class="text-sm font-bold font-mono text-slate-200">--.-</span>
+              <span id="throttle-pct-text" class="text-[10px] text-sky-400 font-mono">THR: 0%</span>
+            </div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+              <div id="eco-bar" class="bg-emerald-400 h-full rounded-full smooth-transition" style="width: 15%;"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ===== 右側：TPMS 胎壓與胎溫監控專區 (5 欄) ===== -->
+      <div class="md:col-span-5 bg-[#0f141f] border border-white/10 rounded-2xl p-4 sm:p-5 flex flex-col justify-between">
+        
+        <div class="flex items-center justify-between pb-2 border-b border-white/10">
+          <div class="flex items-center space-x-2">
+            <i class="ph-bold ph-shield-check text-sky-400 text-base"></i>
+            <div>
+              <h2 class="text-xs font-tech font-bold text-slate-200 tracking-wider">TPMS 胎壓胎溫監測</h2>
+              <span class="text-[10px] text-slate-500 font-mono">REAL-TIME THERMAL DYNAMICS</span>
+            </div>
+          </div>
+          <span class="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">ONLINE</span>
+        </div>
+
+        <!-- 幾何摩托車視圖與前後輪卡片 -->
+        <div class="relative py-2 sm:py-3 flex items-center justify-center">
+          <div class="relative w-44 sm:w-48 h-60 sm:h-64 flex items-center justify-center">
+            <svg class="w-full h-full" viewBox="0 0 160 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M80 68 L94 95 L96 135 L100 170 L92 220 L80 240 L68 220 L60 170 L64 135 L66 95 Z" fill="#141923" stroke="#222c3d" stroke-width="1.5"/>
+              <path d="M50 85 L80 72 L110 85" stroke="#475569" stroke-width="2.5" stroke-linecap="round"/>
+              <ellipse cx="80" cy="130" rx="14" ry="24" fill="#10151f" stroke="#283346" stroke-width="1.5"/>
+              <path d="M72 170 L88 170 L90 205 L70 205 Z" fill="#1a2230" stroke="#334155" stroke-width="1.2"/>
+              <line x1="80" y1="210" x2="80" y2="245" stroke="#475569" stroke-width="3" stroke-linecap="round"/>
+
+              <!-- 前輪胎 -->
+              <rect id="svg-front-wheel" x="71" y="16" width="18" height="46" rx="6" fill="#1e293b" stroke="#38bdf8" stroke-width="2" class="smooth-transition"/>
+              <!-- 後輪胎 (寬胎) -->
+              <rect id="svg-rear-wheel" x="68" y="238" width="24" height="52" rx="7" fill="#1e293b" stroke="#38bdf8" stroke-width="2.5" class="smooth-transition"/>
+
+              <!-- 煞車重力轉移摩擦指示光暈 -->
+              <rect id="front-brake-glow" x="69" y="14" width="22" height="50" rx="8" fill="none" stroke="#f43f5e" stroke-width="2" opacity="0" class="smooth-transition"/>
+            </svg>
+
+            <!-- 前輪數值浮層 -->
+            <div class="absolute -left-1 top-2 bg-black/80 border border-white/10 rounded-xl p-2 sm:p-2.5 w-28 sm:w-30 shadow-lg backdrop-blur-sm">
+              <div class="flex items-center justify-between text-[10px] font-tech text-slate-400">
+                <span class="font-bold text-slate-300">前輪 FRONT</span>
+                <span id="f-tag" class="text-[9px] px-1 rounded bg-slate-800 text-emerald-400 font-mono">OK</span>
+              </div>
+              <div class="mt-1 flex items-baseline">
+                <span id="val-front-press" class="font-mono text-xl sm:text-2xl font-black text-white tabular-nums">32.5</span>
+                <span class="unit-label text-[10px] text-slate-400 font-mono ml-1">PSI</span>
+              </div>
+              <div class="flex items-center justify-between text-[11px] text-slate-400 mt-1 pt-1 border-t border-white/5 font-mono">
+                <span class="text-[9px] text-slate-500">胎溫</span>
+                <span id="val-front-temp" class="text-amber-300 font-semibold">32.0°C</span>
+              </div>
+            </div>
+
+            <!-- 後輪數值浮層 -->
+            <div class="absolute -right-1 bottom-3 bg-black/80 border border-white/10 rounded-xl p-2 sm:p-2.5 w-28 sm:w-30 shadow-lg backdrop-blur-sm">
+              <div class="flex items-center justify-between text-[10px] font-tech text-slate-400">
+                <span class="font-bold text-slate-300">後輪 REAR</span>
+                <span id="r-tag" class="text-[9px] px-1 rounded bg-slate-800 text-emerald-400 font-mono">OK</span>
+              </div>
+              <div class="mt-1 flex items-baseline">
+                <span id="val-rear-press" class="font-mono text-xl sm:text-2xl font-black text-white tabular-nums">36.0</span>
+                <span class="unit-label text-[10px] text-slate-400 font-mono ml-1">PSI</span>
+              </div>
+              <div class="flex items-center justify-between text-[11px] text-slate-400 mt-1 pt-1 border-t border-white/5 font-mono">
+                <span class="text-[9px] text-slate-500">胎溫</span>
+                <span id="val-rear-temp" class="text-amber-300 font-semibold">34.0°C</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 胎溫與摩擦動態提示 -->
+        <div class="bg-black/40 rounded-xl p-2 border border-white/5 text-[10px] font-mono text-slate-400 flex justify-between items-center">
+          <span>重力摩擦轉移效應</span>
+          <span id="brake-friction-status" class="text-slate-500">煞車摩擦平衡</span>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- 3. 底部數據列 (ODO, TRIP, 續航, 8格燃油) -->
+    <div class="bg-[#0f141f] border border-white/10 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-tech">
+      <div class="flex items-center space-x-4 sm:space-x-6 text-slate-400 w-full sm:w-auto justify-between sm:justify-start">
+        <div>
+          <span class="text-[9px] text-slate-500 block">TOTAL ODO</span>
+          <span id="val-odo" class="font-mono text-slate-200 font-semibold text-xs sm:text-sm">014,821.5 km</span>
+        </div>
+        <div class="border-l border-white/10 pl-4 sm:pl-6">
+          <span class="text-[9px] text-slate-500 block">TRIP</span>
+          <span id="val-trip" class="font-mono text-slate-200 font-semibold text-xs sm:text-sm">169.2 km</span>
+        </div>
+        <div class="border-l border-white/10 pl-4 sm:pl-6">
+          <span class="text-[9px] text-slate-500 block">DTE 預估續航</span>
+          <span id="val-dte" class="font-mono text-sky-400 font-semibold text-xs sm:text-sm">264 km</span>
+        </div>
+      </div>
+
+      <!-- 8格液晶燃油條 -->
+      <div class="w-full sm:w-64 flex items-center space-x-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+        <i class="ph-bold ph-gas-pump text-slate-400 text-sm"></i>
+        <div class="flex-1 grid grid-cols-8 gap-1 p-1 bg-black/60 rounded-md border border-white/10 h-4 items-center" id="fuel-cells">
+          <div class="h-full rounded-[2px] bg-sky-400"></div>
+          <div class="h-full rounded-[2px] bg-sky-400"></div>
+          <div class="h-full rounded-[2px] bg-sky-400"></div>
+          <div class="h-full rounded-[2px] bg-sky-400"></div>
+          <div class="h-full rounded-[2px] bg-sky-400"></div>
+          <div class="h-full rounded-[2px] bg-sky-400"></div>
+          <div class="h-full rounded-[2px] bg-sky-400"></div>
+          <div class="h-full rounded-[2px] bg-slate-800"></div>
+        </div>
+        <span id="fuel-pct" class="font-mono font-semibold text-slate-300 min-w-[36px] text-right">72%</span>
+      </div>
+    </div>
+
+    <!-- ==================== 線性油門與煞車控制面板 ==================== -->
+    <div class="bg-[#0f141f] border-2 border-white/15 rounded-2xl p-3 sm:p-4 shadow-xl">
+      <div class="flex items-center justify-between pb-2 mb-2 border-b border-white/10 text-xs font-tech">
+        <div class="flex items-center space-x-2">
+          <i class="ph-fill ph-game-controller text-sky-400 text-base"></i>
+          <span class="font-bold text-white tracking-wider">線性動力與制動操控台 (LINEAR CONTROLS)</span>
+        </div>
+
+        <!-- 油門自動回彈 / 定速鎖定切換 -->
+        <div class="flex items-center space-x-2">
+          <span class="text-[11px] text-slate-400 hidden sm:inline">油門回彈手感:</span>
+          <button id="btn-toggle-spring" onclick="toggleAutoReturn()" class="px-2 py-0.5 rounded text-[11px] font-semibold bg-sky-500/20 text-sky-300 border border-sky-400/50 hover:bg-sky-500/30 transition-all flex items-center space-x-1">
+            <i id="spring-icon" class="ph-bold ph-arrows-counter-clockwise"></i>
+            <span id="spring-text">自動回彈 ON</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6 items-center">
+        <!-- 線性油門 (THROTTLE) -->
+        <div class="bg-black/40 rounded-xl p-2.5 sm:p-3 border border-white/10">
+          <div class="flex justify-between items-center mb-1 text-xs font-tech">
+            <span class="font-bold flex items-center gap-1.5 text-sky-400">
+              <i class="ph-bold ph-lightning"></i> 線性油門 THROTTLE
+            </span>
+            <span id="disp-throttle" class="font-mono text-sm font-bold text-white">0%</span>
+          </div>
+          <input type="range" id="slider-throttle" min="0" max="100" value="0" step="1" class="w-full">
+          <div class="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+            <span>0% (怠速)</span>
+            <span>鍵盤 [W] 或 [↑] 加速</span>
+            <span>100% (全開)</span>
+          </div>
+        </div>
+
+        <!-- 線性煞車 (BRAKE) -->
+        <div class="bg-black/40 rounded-xl p-2.5 sm:p-3 border border-white/10">
+          <div class="flex justify-between items-center mb-1 text-xs font-tech">
+            <span class="font-bold flex items-center gap-1.5 text-rose-400">
+              <i class="ph-bold ph-hand-palm"></i> 線性制動 BRAKE
+            </span>
+            <span id="disp-brake" class="font-mono text-sm font-bold text-white">0%</span>
+          </div>
+          <input type="range" id="slider-brake" min="0" max="100" value="0" step="1" class="w-full">
+          <div class="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+            <span>0% (釋放)</span>
+            <span>鍵盤 [空白鍵] 或 [S]</span>
+            <span>100% (重煞)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ==================== QR Code 彈窗 Modal ==================== -->
+  <div id="qr-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-[#121724] border border-white/20 rounded-2xl p-5 max-w-sm w-full shadow-2xl relative text-center">
+      <button onclick="closeQrModal()" class="absolute right-4 top-4 text-slate-400 hover:text-white p-1">
+        <i class="ph-bold ph-x text-lg"></i>
+      </button>
+
+      <div class="inline-flex p-2.5 rounded-full bg-sky-500/10 text-sky-400 mb-2">
+        <i class="ph-bold ph-device-mobile-camera text-2xl"></i>
+      </div>
+      <h3 class="font-tech text-lg font-bold text-white">手機掃描連線儀表</h3>
+      <p class="text-xs text-slate-400 mt-1">
+        使用手機相機掃描 QR Code，即可在手機瀏覽器上全螢幕體驗。
+      </p>
+
+      <!-- QR Code 產生容器 (高對比白底) -->
+      <div class="my-4 flex justify-center">
+        <div id="qrcode-box" class="p-3 bg-white rounded-xl shadow-inner inline-block"></div>
+      </div>
+
+      <!-- 自訂網址輸入區 (方便輸入 GitHub Pages 等永久公開網址) -->
+      <div class="text-left space-y-1">
+        <label class="text-[10px] font-tech text-slate-400">當前或自訂永久公開網址 (URL):</label>
+        <div class="flex gap-1">
+          <input type="text" id="custom-url-input" class="flex-1 bg-black/60 border border-white/10 rounded px-2 py-1 text-xs font-mono text-slate-300 focus:outline-none focus:border-sky-500">
+          <button onclick="updateQrFromInput()" class="px-2.5 py-1 bg-sky-500 hover:bg-sky-400 text-black font-bold text-xs rounded transition-colors font-tech">
+            更新 QR
+          </button>
+        </div>
+      </div>
+
+      <button onclick="closeQrModal()" class="mt-4 w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-tech text-slate-300 transition-colors">
+        關閉視窗
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== 核心動態與物理演算腳本 ==================== -->
+  <script>
+    // --- 系統狀態管理 ---
+    const state = {
+      unit: 'psi',             // 'psi' | 'bar'
+      autoReturn: true,        // 油門放開時是否自動回彈歸零
+
+      // 線性輸入 (0.0 ~ 1.0)
+      throttleInput: 0,
+      brakeInput: 0,
+
+      // 車輛動態指標
+      speed: 0,                // km/h
+      rpm: 1250,               // 轉速
+      gear: 'N',               // 檔位: N, 1, 2, 3, 4, 5, 6
+      
+      // 引擎熱管理
+      coolantTemp: 89.0,       // 水溫 (°C)
+      fanActive: false,
+
+      // 輪胎 TPMS (基準: 前 32.5 / 後 36.0 PSI，溫度 28°C)
+      fBasePsi: 32.5,
+      rBasePsi: 36.0,
+      fTemp: 32.0,             // 前輪溫 (°C)
+      rTemp: 34.0,             // 後輪溫 (°C)
+      fPress: 32.5,
+      rPress: 36.0,
+
+      // 燃油管理 (15L 油箱)
+      fuelCapacity: 15.0,
+      fuelRemain: 10.8,        // 剩餘公升數
+      odo: 14821.5,
+      trip: 169.2
+    };
+
+    // --- DOM 快取 ---
+    const dom = {
+      speed: document.getElementById('speed-val'),
+      rpmText: document.getElementById('rpm-text'),
+      rpmBar: document.getElementById('rpm-bar'),
+      gear: document.getElementById('gear-val'),
+      gearBox: document.getElementById('gear-box'),
+      sliderThrottle: document.getElementById('slider-throttle'),
+      sliderBrake: document.getElementById('slider-brake'),
+      dispThrottle: document.getElementById('disp-throttle'),
+      dispBrake: document.getElementById('disp-brake'),
+      driveDot: document.getElementById('drive-state-dot'),
+      driveText: document.getElementById('drive-state-text'),
+      coolantVal: document.getElementById('coolant-val'),
+      coolantBar: document.getElementById('coolant-bar'),
+      coolantState: document.getElementById('coolant-state'),
+      fanBadge: document.getElementById('fan-badge'),
+      fanIcon: document.getElementById('fan-icon'),
+      fanStatus: document.getElementById('fan-status'),
+      ecoVal: document.getElementById('eco-val'),
+      ecoBar: document.getElementById('eco-bar'),
+      throttlePctText: document.getElementById('throttle-pct-text'),
+      valFrontPress: document.getElementById('val-front-press'),
+      valFrontTemp: document.getElementById('val-front-temp'),
+      valRearPress: document.getElementById('val-rear-press'),
+      valRearTemp: document.getElementById('val-rear-temp'),
+      frontBrakeGlow: document.getElementById('front-brake-glow'),
+      brakeFrictionStatus: document.getElementById('brake-friction-status'),
+      fuelPct: document.getElementById('fuel-pct'),
+      fuelCells: document.getElementById('fuel-cells'),
+      valDte: document.getElementById('val-dte'),
+      valOdo: document.getElementById('val-odo'),
+      valTrip: document.getElementById('val-trip'),
+      clock: document.getElementById('clock-display'),
+      btnUnit: document.getElementById('btn-unit'),
+      btnToggleSpring: document.getElementById('btn-toggle-spring'),
+      springIcon: document.getElementById('spring-icon'),
+      springText: document.getElementById('spring-text')
+    };
+
+    // --- 單位切換 (PSI / BAR) ---
+    function setPressureUnit(unit) {
+      state.unit = unit;
+      dom.btnUnit.textContent = `單位: ${unit.toUpperCase()}`;
+      document.querySelectorAll('.unit-label').forEach(el => el.textContent = unit.toUpperCase());
+      renderTPMS();
+    }
+
+    // --- 油門自動回彈開關 ---
+    function toggleAutoReturn() {
+      state.autoReturn = !state.autoReturn;
+      if (state.autoReturn) {
+        dom.btnToggleSpring.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-sky-500/20 text-sky-300 border border-sky-400/50 hover:bg-sky-500/30 transition-all flex items-center space-x-1';
+        dom.springIcon.className = 'ph-bold ph-arrows-counter-clockwise';
+        dom.springText.textContent = '自動回彈 ON';
+      } else {
+        dom.btnToggleSpring.className = 'px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-400/50 hover:bg-amber-500/30 transition-all flex items-center space-x-1';
+        dom.springIcon.className = 'ph-bold ph-lock-key';
+        dom.springText.textContent = '油門鎖定 (HOLD)';
+      }
+    }
+
+    // --- 線性滑動條監聽 ---
+    dom.sliderThrottle.addEventListener('input', (e) => {
+      state.throttleInput = parseFloat(e.target.value) / 100;
+      dom.dispThrottle.textContent = `${Math.round(state.throttleInput * 100)}%`;
+      dom.throttlePctText.textContent = `THR: ${Math.round(state.throttleInput * 100)}%`;
+    });
+
+    // 放開滑桿時的自動回彈
+    function handleThrottleRelease() {
+      if (state.autoReturn) {
+        state.throttleInput = 0;
+        dom.sliderThrottle.value = 0;
+        dom.dispThrottle.textContent = '0%';
+        dom.throttlePctText.textContent = 'THR: 0%';
+      }
+    }
+    dom.sliderThrottle.addEventListener('mouseup', handleThrottleRelease);
+    dom.sliderThrottle.addEventListener('touchend', handleThrottleRelease);
+
+    dom.sliderBrake.addEventListener('input', (e) => {
+      state.brakeInput = parseFloat(e.target.value) / 100;
+      dom.dispBrake.textContent = `${Math.round(state.brakeInput * 100)}%`;
+    });
+    function handleBrakeRelease() {
+      state.brakeInput = 0;
+      dom.sliderBrake.value = 0;
+      dom.dispBrake.textContent = '0%';
+    }
+    dom.sliderBrake.addEventListener('mouseup', handleBrakeRelease);
+    dom.sliderBrake.addEventListener('touchend', handleBrakeRelease);
+
+    // --- 鍵盤熱鍵操作 (W/S 控制油門，空白鍵控制煞車) ---
+    const keys = {};
+    window.addEventListener('keydown', (e) => {
+      if (['Space', 'ArrowUp', 'ArrowDown', 'KeyW', 'KeyS'].includes(e.code)) {
+        if (e.target.tagName !== 'INPUT') e.preventDefault();
+      }
+      keys[e.code] = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      keys[e.code] = false;
+      if (e.code === 'KeyW' || e.code === 'ArrowUp') {
+        if (state.autoReturn) {
+          state.throttleInput = 0;
+          dom.sliderThrottle.value = 0;
+          dom.dispThrottle.textContent = '0%';
+          dom.throttlePctText.textContent = 'THR: 0%';
+        }
+      }
+      if (e.code === 'Space') {
+        state.brakeInput = 0;
+        dom.sliderBrake.value = 0;
+        dom.dispBrake.textContent = '0%';
+      }
+    });
+
+    function processKeyboardInputs() {
+      // 油門控制 W / Up
+      if (keys['KeyW'] || keys['ArrowUp']) {
+        state.throttleInput = Math.min(1.0, state.throttleInput + 0.04);
+        dom.sliderThrottle.value = Math.round(state.throttleInput * 100);
+        dom.dispThrottle.textContent = `${Math.round(state.throttleInput * 100)}%`;
+        dom.throttlePctText.textContent = `THR: ${Math.round(state.throttleInput * 100)}%`;
+      }
+      // 減油門 S / Down
+      if (keys['KeyS'] || keys['ArrowDown']) {
+        state.throttleInput = Math.max(0, state.throttleInput - 0.05);
+        dom.sliderThrottle.value = Math.round(state.throttleInput * 100);
+        dom.dispThrottle.textContent = `${Math.round(state.throttleInput * 100)}%`;
+        dom.throttlePctText.textContent = `THR: ${Math.round(state.throttleInput * 100)}%`;
+      }
+      // 煞車控制 Space
+      if (keys['Space']) {
+        state.brakeInput = Math.min(1.0, state.brakeInput + 0.08);
+        dom.sliderBrake.value = Math.round(state.brakeInput * 100);
+        dom.dispBrake.textContent = `${Math.round(state.brakeInput * 100)}%`;
+      }
+    }
+
+    // --- 高擬真物理演算法 (60FPS 主循環) ---
+    function updatePhysicsEngine() {
+      processKeyboardInputs();
+
+      const throttle = state.throttleInput;
+      const brake = state.brakeInput;
+
+      // 1. 檔位與變速箱比 (1~6 檔 + 空檔 N)
+      let targetGear = 'N';
+      let maxSpeedForGear = 0;
+
+      if (state.speed < 1.0 && throttle === 0) {
+        targetGear = 'N';
+      } else if (state.speed < 45) {
+        targetGear = '1'; maxSpeedForGear = 55;
+      } else if (state.speed < 75) {
+        targetGear = '2'; maxSpeedForGear = 88;
+      } else if (state.speed < 110) {
+        targetGear = '3'; maxSpeedForGear = 125;
+      } else if (state.speed < 145) {
+        targetGear = '4'; maxSpeedForGear = 160;
+      } else if (state.speed < 185) {
+        targetGear = '5'; maxSpeedForGear = 205;
+      } else {
+        targetGear = '6'; maxSpeedForGear = 260;
+      }
+      state.gear = targetGear;
+
+      // 2. 加速力道計算 (受油門開度與風阻阻力影響)
+      let driveForce = 0;
+      if (throttle > 0) {
+        if (state.gear === 'N') {
+          driveForce = 0; // 空檔油門只催轉速不走車
+        } else {
+          driveForce = throttle * 1.85; 
+        }
+      }
+
+      // 空氣阻力與滾動阻力
+      const airDrag = 0.00015 * (state.speed * state.speed);
+      const rollResistance = state.speed > 0 ? 0.08 : 0;
+      const brakeForce = brake * 3.8;
+
+      // 速度整合計算
+      const netAcceleration = driveForce - airDrag - rollResistance - brakeForce;
+      state.speed = Math.max(0, state.speed + netAcceleration * 0.4);
+
+      // 3. 轉速 (RPM) 演算
+      let targetRpm = 1250;
+      if (state.gear === 'N') {
+        targetRpm = 1250 + throttle * 10500 + (Math.random() - 0.5) * 80;
+      } else {
+        const gearRpmBands = {
+          '1': { min: 2000, max: 11500, topSpd: 55 },
+          '2': { min: 3500, max: 12000, topSpd: 88 },
+          '3': { min: 4200, max: 12500, topSpd: 125 },
+          '4': { min: 4600, max: 12800, topSpd: 160 },
+          '5': { min: 4800, max: 13000, topSpd: 205 },
+          '6': { min: 5000, max: 13200, topSpd: 260 },
+        };
+        const band = gearRpmBands[state.gear];
+        const ratio = Math.min(1.0, state.speed / band.topSpd);
+        targetRpm = band.min + ratio * (band.max - band.min) + throttle * 1200;
+      }
+      state.rpm += (targetRpm - state.rpm) * 0.18;
+
+      // 4. 熱管理物理 (水溫 + 散熱風扇)
+      if (state.speed > 45) {
+        // 高速撞風冷卻，水溫降至 88~90°C
+        if (state.coolantTemp > 89.0) state.coolantTemp -= 0.035;
+      } else if (state.speed < 10) {
+        // 低速/怠速無撞風，水溫緩步升至 97°C
+        if (state.coolantTemp < 98.0) state.coolantTemp += 0.025;
+      }
+
+      // 散熱風扇溫控：96°C 觸發強制散熱，降至 91°C 關閉
+      if (state.coolantTemp >= 96.0) {
+        state.fanActive = true;
+        state.coolantTemp -= 0.045; // 風扇抽風散熱
+      } else if (state.coolantTemp <= 91.0) {
+        state.fanActive = false;
+      }
+
+      // 5. TPMS 輪胎摩擦升溫與重力轉移煞車效應
+      if (state.speed > 5) {
+        // 行駛滾動摩擦升溫
+        state.fTemp += 0.003;
+        state.rTemp += 0.004;
+      } else {
+        // 停車緩慢冷卻回常溫
+        if (state.fTemp > 31.0) state.fTemp -= 0.006;
+        if (state.rTemp > 33.0) state.rTemp -= 0.006;
+      }
+
+      // 煞車時前輪承受 70% 制動負載，摩擦急遽升溫！
+      if (brake > 0 && state.speed > 2) {
+        state.fTemp += brake * 0.045; // 前輪急劇升溫
+        state.rTemp += brake * 0.015; // 後輪小幅升溫
+      }
+
+      // 限制胎溫合理區間
+      state.fTemp = Math.min(68, Math.max(28, state.fTemp));
+      state.rTemp = Math.min(72, Math.max(30, state.rTemp));
+
+      // 氣體熱膨脹律 (每升高 10°C 胎壓約增加 0.8 PSI)
+      state.fPress = state.fBasePsi + (state.fTemp - 28) * 0.085;
+      state.rPress = state.rBasePsi + (state.rTemp - 28) * 0.095;
+
+      // 6. 里程累積與燃油消耗
+      if (state.speed > 0) {
+        const deltaKm = (state.speed / 3600) * (1 / 60);
+        state.odo += deltaKm;
+        state.trip += deltaKm;
+
+        // 油耗依油門開度與時速波動 (約 16 ~ 32 km/L)
+        const currentKmPerL = 32 - (throttle * 14) + (state.speed > 80 ? -4 : 0);
+        const fuelBurned = deltaKm / Math.max(12, currentKmPerL);
+        state.fuelRemain = Math.max(0.5, state.fuelRemain - fuelBurned);
+
+        dom.ecoVal.textContent = currentKmPerL.toFixed(1);
+        dom.ecoBar.style.width = `${Math.min(100, (currentKmPerL / 35) * 100)}%`;
+      } else {
+        dom.ecoVal.textContent = '0.8 L/h';
+        dom.ecoBar.style.width = '10%';
+      }
+
+      renderUI();
+      requestAnimationFrame(updatePhysicsEngine);
+    }
+
+    // --- 介面渲染更新 ---
+    function renderUI() {
+      // 時速
+      dom.speed.textContent = Math.round(state.speed);
+
+      // 檔位
+      dom.gear.textContent = state.gear;
+      if (state.gear === 'N') {
+        dom.gear.className = 'font-tech text-4xl sm:text-6xl font-black text-emerald-400';
+        dom.gearBox.style.borderColor = '#34d399';
+        dom.driveDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+        dom.driveText.textContent = '怠速運轉 (IDLE)';
+      } else {
+        dom.gear.className = 'font-tech text-4xl sm:text-6xl font-black text-white';
+        dom.gearBox.style.borderColor = 'rgba(255, 255, 255, 0.25)';
+        dom.driveDot.className = 'w-2 h-2 rounded-full bg-sky-400';
+        dom.driveText.textContent = state.brakeInput > 0 ? '煞車制動中 (BRAKING)' : '加速巡航中 (CRUISING)';
+      }
+
+      // 轉速
+      dom.rpmText.textContent = Math.round(state.rpm).toLocaleString();
+      const rpmPct = Math.min(100, Math.max(0, (state.rpm / 13000) * 100));
+      dom.rpmBar.style.width = `${rpmPct}%`;
+
+      // 水溫與風扇
+      dom.coolantVal.textContent = `${Math.round(state.coolantTemp)}°C`;
+      const coolantBarPct = Math.min(100, Math.max(10, ((state.coolantTemp - 60) / 55) * 100));
+      dom.coolantBar.style.width = `${coolantBarPct}%`;
+
+      if (state.fanActive) {
+        dom.fanBadge.className = 'flex items-center space-x-1 text-[10px] px-1.5 py-0.5 rounded bg-teal-950 text-teal-300 border border-teal-500/40 font-mono';
+        dom.fanIcon.className = 'ph-bold ph-fan fan-spinning text-teal-400';
+        dom.fanStatus.textContent = 'FAN ACTIVE';
+        dom.coolantState.textContent = '風扇主動散熱';
+        dom.coolantState.className = 'text-[10px] text-teal-400 font-mono';
+      } else if (state.speed > 45) {
+        dom.fanBadge.className = 'flex items-center space-x-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 font-mono';
+        dom.fanIcon.className = 'ph-bold ph-fan';
+        dom.fanStatus.textContent = 'FAN OFF';
+        dom.coolantState.textContent = '迎風高速冷卻';
+        dom.coolantState.className = 'text-[10px] text-sky-400 font-mono';
+      } else {
+        dom.fanBadge.className = 'flex items-center space-x-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 font-mono';
+        dom.fanIcon.className = 'ph-bold ph-fan';
+        dom.fanStatus.textContent = 'FAN OFF';
+        dom.coolantState.textContent = '怠速蓄溫中';
+        dom.coolantState.className = 'text-[10px] text-slate-500 font-mono';
+      }
+
+      // 煞車前輪紅光指示
+      if (state.brakeInput > 0) {
+        dom.frontBrakeGlow.style.opacity = state.brakeInput;
+        dom.brakeFrictionStatus.textContent = `前煞摩擦蓄熱 ${(state.brakeInput * 100).toFixed(0)}%`;
+        dom.brakeFrictionStatus.className = 'text-rose-400 font-bold';
+      } else {
+        dom.frontBrakeGlow.style.opacity = 0;
+        dom.brakeFrictionStatus.textContent = '行駛滾動平衡';
+        dom.brakeFrictionStatus.className = 'text-slate-500';
+      }
+
+      // 燃油矩陣 (8 格)
+      const fuelPercent = Math.min(100, Math.max(0, (state.fuelRemain / state.fuelCapacity) * 100));
+      dom.fuelPct.textContent = `${Math.round(fuelPercent)}%`;
+      const activeFuelCells = Math.ceil((fuelPercent / 100) * 8);
+      const cells = dom.fuelCells.querySelectorAll('div');
+      cells.forEach((cell, idx) => {
+        if (idx < activeFuelCells) {
+          cell.className = activeFuelCells <= 2 ? 'h-full rounded-[2px] bg-rose-500' : 'h-full rounded-[2px] bg-sky-400';
+        } else {
+          cell.className = 'h-full rounded-[2px] bg-slate-800';
+        }
+      });
+
+      // 里程與 DTE 續航
+      dom.valOdo.textContent = `${state.odo.toFixed(1).padStart(8, '0')} km`;
+      dom.valTrip.textContent = `${state.trip.toFixed(1)} km`;
+      dom.valDte.textContent = `${Math.round(state.fuelRemain * 26)} km`;
+
+      renderTPMS();
+    }
+
+    function renderTPMS() {
+      const isBar = state.unit === 'bar';
+      const fP = isBar ? (state.fPress * 0.0689476).toFixed(2) : state.fPress.toFixed(1);
+      const rP = isBar ? (state.rPress * 0.0689476).toFixed(2) : state.rPress.toFixed(1);
+
+      dom.valFrontPress.textContent = fP;
+      dom.valRearPress.textContent = rP;
+      dom.valFrontTemp.textContent = `${state.fTemp.toFixed(1)}°C`;
+      dom.valRearTemp.textContent = `${state.rTemp.toFixed(1)}°C`;
+    }
+
+    // --- QR Code 彈窗與自訂網址連線 ---
+    let qrcodeObj = null;
+
+    function openQrModal() {
+      const modal = document.getElementById('qr-modal');
+      const input = document.getElementById('custom-url-input');
+      const currentUrl = window.location.href;
+      input.value = currentUrl;
+      modal.classList.remove('hidden');
+
+      if (!qrcodeObj) {
+        const box = document.getElementById('qrcode-box');
+        box.innerHTML = '';
+        qrcodeObj = new QRCode(box, {
+          text: currentUrl,
+          width: 160,
+          height: 160,
+          colorDark: "#07090e",
+          colorLight: "#ffffff",
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }
+    }
+
+    function closeQrModal() {
+      document.getElementById('qr-modal').classList.add('hidden');
+    }
+
+    function updateQrFromInput() {
+      const url = document.getElementById('custom-url-input').value.trim();
+      if (url && qrcodeObj) {
+        qrcodeObj.clear();
+        qrcodeObj.makeCode(url);
+      }
+    }
+
+    // 點擊彈窗外部關閉
+    document.getElementById('qr-modal').addEventListener('click', function(e) {
+      if (e.target === this) closeQrModal();
+    });
+
+    // 定時時鐘
+    setInterval(() => {
+      const now = new Date();
+      dom.clock.textContent = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    }, 1000);
+
+    // 啟動主物理迴圈
+    window.onload = function() {
+      requestAnimationFrame(updatePhysicsEngine);
+    };
+  </script>
+</body>
+</html>
